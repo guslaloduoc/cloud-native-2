@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Diagrama - Sistema de Biblioteca Cloud Native</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 30px;
+        }
+        .container {
+            width: 1100px;
+            position: relative;
+        }
+        .title {
+            text-align: center;
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 25px;
+            color: #333;
+        }
+        .layout {
+            display: flex;
+            align-items: center;
+            gap: 30px;
+        }
+        .box {
+            border: 2px solid #999;
+            border-radius: 8px;
+            padding: 15px 18px;
+            text-align: center;
+            background: #fff;
+            min-width: 140px;
+        }
+        .box-title {
+            font-weight: bold;
+            font-size: 14px;
+            color: #333;
+        }
+        .box-sub {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+        .arrow {
+            display: flex;
+            align-items: center;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .arrow-line {
+            font-size: 22px;
+            color: #555;
+            letter-spacing: -2px;
+        }
+        .arrow-label {
+            font-size: 11px;
+            color: #555;
+            white-space: nowrap;
+        }
+        .azure-zone {
+            border: 2px solid #ccc;
+            border-radius: 12px;
+            background: #FFFDE7;
+            padding: 20px;
+            flex: 1;
+        }
+        .azure-title {
+            font-size: 14px;
+            font-weight: bold;
+            color: #555;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        .azure-content {
+            display: flex;
+            gap: 20px;
+        }
+        .functions-col {
+            flex: 1;
+        }
+        .functions-col-title {
+            font-size: 13px;
+            font-weight: bold;
+            color: #666;
+            margin-bottom: 10px;
+            text-align: center;
+            padding: 5px;
+            border-radius: 5px;
+        }
+        .rest-title { background: #E3F2FD; }
+        .graphql-title { background: #F3E5F5; }
+        .function-box {
+            border: 2px solid #aaa;
+            border-radius: 8px;
+            padding: 12px 15px;
+            text-align: center;
+            margin-bottom: 12px;
+        }
+        .fn-rest { background: #E8EAF6; }
+        .fn-graphql { background: #EDE7F6; }
+        .fn-name {
+            font-weight: bold;
+            font-size: 13px;
+            color: #333;
+        }
+        .fn-detail {
+            font-size: 11px;
+            color: #666;
+            margin-top: 3px;
+        }
+        .fn-route {
+            font-size: 11px;
+            color: #1565C0;
+            margin-top: 3px;
+            font-family: monospace;
+        }
+        .bff-arrows {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            min-width: 120px;
+        }
+        .bff-arrow-item {
+            font-size: 11px;
+            color: #555;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .bff-arrow-item .route {
+            font-family: monospace;
+            font-size: 10px;
+            color: #1565C0;
+        }
+        .badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: bold;
+            margin-top: 4px;
+        }
+        .badge-rest { background: #BBDEFB; color: #1565C0; }
+        .badge-graphql { background: #CE93D8; color: #4A148C; }
+        .badge-new { background: #C8E6C9; color: #2E7D32; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="title">Arquitectura - Sistema de Biblioteca Cloud Native 2</div>
+        <div class="layout">
+            <!-- Cliente -->
+            <div>
+                <div class="box">
+                    <div class="box-title">Cliente</div>
+                    <div class="box-sub">Postman</div>
+                </div>
+            </div>
+
+            <!-- Flecha Cliente -> BFF -->
+            <div class="arrow">
+                <div class="arrow-label">REST / JSON</div>
+                <div class="arrow-line">───────►</div>
+            </div>
+
+            <!-- BFF -->
+            <div>
+                <div class="box" style="background: #E8F5E9; min-width: 180px;">
+                    <div class="box-title">BFF Biblioteca</div>
+                    <div class="box-sub">App Service - Spring Boot</div>
+                    <div class="box-sub" style="font-family: monospace; font-size: 10px; margin-top: 6px;">Puerto 8080</div>
+                    <div class="box-sub" style="margin-top: 6px;">
+                        <span class="badge badge-rest">REST</span>
+                        <span class="badge badge-graphql">GraphQL</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Flechas BFF -> Functions -->
+            <div class="bff-arrows">
+                <div class="bff-arrow-item"><span class="route">/api/usuarios</span> ──►</div>
+                <div class="bff-arrow-item"><span class="route">/api/prestamos</span> ──►</div>
+                <div class="bff-arrow-item"><span class="route">/api/usuarios-graphql</span> ──►</div>
+                <div class="bff-arrow-item"><span class="route">/api/prestamos-graphql</span> ──►</div>
+            </div>
+
+            <!-- Azure Zone -->
+            <div class="azure-zone">
+                <div class="azure-title">Microsoft Azure - Nube &nbsp;|&nbsp; Azure Functions - FaaS</div>
+                <div class="azure-content">
+                    <!-- REST Functions -->
+                    <div class="functions-col">
+                        <div class="functions-col-title rest-title">API REST</div>
+                        <div class="function-box fn-rest">
+                            <div class="fn-name">Fn Serverless Usuarios</div>
+                            <div class="fn-detail">Java 17</div>
+                            <div class="fn-detail">CRUD Usuarios</div>
+                            <div class="fn-route">/api/usuarios/{id}</div>
+                            <div><span class="badge badge-rest">REST</span></div>
+                        </div>
+                        <div class="function-box fn-rest">
+                            <div class="fn-name">Fn Serverless Prestamos</div>
+                            <div class="fn-detail">Java 17</div>
+                            <div class="fn-detail">CRUD Prestamos Libros</div>
+                            <div class="fn-route">/api/prestamos/{id}</div>
+                            <div><span class="badge badge-rest">REST</span></div>
+                        </div>
+                    </div>
+                    <!-- GraphQL Functions -->
+                    <div class="functions-col">
+                        <div class="functions-col-title graphql-title">API GraphQL <span class="badge badge-new">NUEVO</span></div>
+                        <div class="function-box fn-graphql">
+                            <div class="fn-name">Fn Serverless Usuarios</div>
+                            <div class="fn-detail">Java 17 + graphql-java</div>
+                            <div class="fn-detail">CRUD Usuarios</div>
+                            <div class="fn-route">/api/graphql</div>
+                            <div><span class="badge badge-graphql">GraphQL</span> <span class="badge badge-new">NUEVO</span></div>
+                        </div>
+                        <div class="function-box fn-graphql">
+                            <div class="fn-name">Fn Serverless Prestamos</div>
+                            <div class="fn-detail">Java 17 + graphql-java</div>
+                            <div class="fn-detail">CRUD Prestamos Libros</div>
+                            <div class="fn-route">/api/graphql</div>
+                            <div><span class="badge badge-graphql">GraphQL</span> <span class="badge badge-new">NUEVO</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

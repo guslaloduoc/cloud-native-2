@@ -5,12 +5,20 @@ import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 
+/**
+ * Controller del BFF que ORQUESTA las llamadas REST al dominio Usuarios.
+ *
+ * Funciona como proxy hacia la Azure Function fn-usuarios. Mismo patron
+ * que BffPrestamoController: el cliente solo conoce el BFF y este
+ * reenvia las peticiones a la funcion serverless correspondiente.
+ */
 @RestController
 @RequestMapping("/api/usuarios")
 public class BffUsuarioController {
 
     private final RestTemplate restTemplate;
 
+    // URL base de fn-usuarios (Azure Function REST), externalizada por env var
     @Value("${faas.usuarios.url}")
     private String usuariosUrl;
 

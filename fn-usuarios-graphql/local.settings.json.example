@@ -1,0 +1,8 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "java",
+    "FN_USUARIOS_URL": "https://fn-usuarios-biblioteca-XXXX.brazilsouth-01.azurewebsites.net/api",
+    "FN_PRESTAMOS_URL": "https://fn-prestamos-biblioteca-XXXX.brazilsouth-01.azurewebsites.net/api"
+  }
+}

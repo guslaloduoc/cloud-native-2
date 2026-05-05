@@ -5,6 +5,13 @@ import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 
+/**
+ * Controller del BFF que ORQUESTA las consultas GraphQL del dominio Usuarios.
+ *
+ * Mismo patron que BffPrestamoGraphQLController: actua como proxy
+ * transparente del cuerpo GraphQL. La logica enriquecida (filtros,
+ * paginacion, joins con prestamos) vive en fn-usuarios-graphql.
+ */
 @RestController
 @RequestMapping("/api/usuarios-graphql")
 public class BffUsuarioGraphQLController {
@@ -18,7 +25,7 @@ public class BffUsuarioGraphQLController {
         this.restTemplate = restTemplate;
     }
 
-    // POST - Proxy hacia la Azure Function GraphQL de Usuarios
+    /** Reenvia el query/mutation GraphQL a fn-usuarios-graphql. */
     @PostMapping
     public ResponseEntity<String> graphql(@RequestBody String body) {
         String url = usuariosGraphqlUrl + "/graphql";

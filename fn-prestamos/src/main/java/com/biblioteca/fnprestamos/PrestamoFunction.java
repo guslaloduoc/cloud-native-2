@@ -1,5 +1,11 @@
 package com.biblioteca.fnprestamos;
 
+import com.azure.core.credential.AzureKeyCredential;
+import com.azure.core.models.CloudEvent;
+import com.azure.core.models.CloudEventDataFormat;
+import com.azure.core.util.BinaryData;
+import com.azure.messaging.eventgrid.EventGridPublisherClient;
+import com.azure.messaging.eventgrid.EventGridPublisherClientBuilder;
 import com.biblioteca.fnprestamos.model.Prestamo;
 import com.google.gson.Gson;
 import com.microsoft.azure.functions.*;
@@ -8,11 +14,23 @@ import com.microsoft.azure.functions.annotation.*;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * Funcion serverless del dominio Prestamos.
+ *
+ * Ademas del CRUD REST tradicional, actua como PRODUCTOR de eventos:
+ * cada vez que se crea un prestamo, publica un evento "PrestamoCreado"
+ * al topic de Azure Event Grid. Otras funciones (subscribers) reaccionan
+ * a ese evento de forma asincrona y desacoplada.
+ */
 public class PrestamoFunction {
 
+    // Almacen en memoria - este modulo es la "fuente de verdad" de los prestamos
     private static final Map<Long, Prestamo> prestamos = new HashMap<>();
     private static final AtomicLong idCounter = new AtomicLong(1);
     private static final Gson gson = new Gson();
+
+    // Cliente de Event Grid (lazy: se crea solo cuando se necesita publicar el primer evento)
+    private static EventGridPublisherClient<CloudEvent> eventGridClient;
 
     // Datos dummy iniciales
     static {
@@ -22,8 +40,58 @@ public class PrestamoFunction {
         prestamos.put(p2.getId(), p2);
     }
 
-    // GET /api/prestamos - Listar todos
-    // GET /api/prestamos/{id} - Buscar por ID
+    /**
+     * Construye y cachea el cliente de Azure Event Grid.
+     * Lee endpoint y key desde variables de entorno (configuradas en Azure
+     * Application Settings) para no exponer credenciales en el codigo.
+     */
+    private static synchronized EventGridPublisherClient<CloudEvent> getEventGridClient() {
+        if (eventGridClient == null) {
+            String endpoint = System.getenv("EVENT_GRID_ENDPOINT");
+            String key = System.getenv("EVENT_GRID_KEY");
+            if (endpoint == null || key == null) {
+                throw new IllegalStateException(
+                        "EVENT_GRID_ENDPOINT y EVENT_GRID_KEY deben estar configurados");
+            }
+            eventGridClient = new EventGridPublisherClientBuilder()
+                    .endpoint(endpoint)
+                    .credential(new AzureKeyCredential(key))
+                    .buildCloudEventPublisherClient();   // formato CloudEvents v1.0
+        }
+        return eventGridClient;
+    }
+
+    /**
+     * PUBLICA EL EVENTO al Event Grid Topic.
+     *
+     * Construye un CloudEvent (estandar abierto) con:
+     *   - source:  quien publica el evento  -> "biblioteca/fn-prestamos"
+     *   - type:    nombre del evento         -> "PrestamoCreado"
+     *   - subject: identificador del recurso -> "biblioteca/prestamos/{id}"
+     *   - data:    el prestamo completo en JSON
+     *
+     * El evento queda disponible para todos los subscribers en paralelo
+     * (fan-out): fn-notificaciones y fn-auditoria. Esta funcion NO sabe
+     * quienes son los consumidores, lo cual es la esencia de EDA.
+     */
+    private static void publishPrestamoCreado(Prestamo prestamo, ExecutionContext context) {
+        try {
+            CloudEvent event = new CloudEvent(
+                    "biblioteca/fn-prestamos",                        // source
+                    "PrestamoCreado",                                  // type
+                    BinaryData.fromObject(prestamo),                   // data (payload)
+                    CloudEventDataFormat.JSON,
+                    "application/json"
+            ).setSubject("biblioteca/prestamos/" + prestamo.getId());
+
+            getEventGridClient().sendEvent(event);                     // <- envio asincrono
+            context.getLogger().info("Evento PrestamoCreado publicado a Event Grid para prestamo id=" + prestamo.getId());
+        } catch (Exception e) {
+            // Si falla la publicacion no rompemos el CRUD: el prestamo ya esta guardado.
+            context.getLogger().warning("No se pudo publicar evento a Event Grid: " + e.getMessage());
+        }
+    }
+
     @FunctionName("getPrestamos")
     public HttpResponseMessage get(
             @HttpTrigger(name = "req",
@@ -57,7 +125,6 @@ public class PrestamoFunction {
         }
     }
 
-    // POST /api/prestamos - Crear prestamo
     @FunctionName("createPrestamo")
     public HttpResponseMessage create(
             @HttpTrigger(name = "req",
@@ -81,7 +148,12 @@ public class PrestamoFunction {
         if (prestamo.getEstado() == null) {
             prestamo.setEstado("ACTIVO");
         }
-        prestamos.put(prestamo.getId(), prestamo);
+        prestamos.put(prestamo.getId(), prestamo);     // 1) guarda en memoria
+
+        // 2) Publica el evento "PrestamoCreado" al Event Grid Topic.
+        //    Esto dispara el flujo asincrono: el evento llega en paralelo
+        //    a fn-notificaciones (simula email) y fn-auditoria (registra log).
+        publishPrestamoCreado(prestamo, context);
 
         return request.createResponseBuilder(HttpStatus.CREATED)
                 .header("Content-Type", "application/json")
@@ -89,7 +161,6 @@ public class PrestamoFunction {
                 .build();
     }
 
-    // PUT /api/prestamos/{id} - Actualizar prestamo
     @FunctionName("updatePrestamo")
     public HttpResponseMessage update(
             @HttpTrigger(name = "req",
@@ -126,7 +197,6 @@ public class PrestamoFunction {
                 .build();
     }
 
-    // DELETE /api/prestamos/{id} - Eliminar prestamo
     @FunctionName("deletePrestamo")
     public HttpResponseMessage delete(
             @HttpTrigger(name = "req",

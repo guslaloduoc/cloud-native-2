@@ -11,6 +11,7 @@ services:
     environment:
       - FAAS_USUARIOS_URL=https://fn-usuarios-biblioteca-dkbag6cefwcpfube.brazilsouth-01.azurewebsites.net/api
       - FAAS_PRESTAMOS_URL=https://fn-prestamos-biblioteca-fefqfdc7bdewcvbc.brazilsouth-01.azurewebsites.net/api
+      - FAAS_LIBROS_URL=https://fn-libros-biblioteca.azurewebsites.net/api
       - FAAS_USUARIOS_GRAPHQL_URL=https://fn-usuarios-graphql-biblioteca.azurewebsites.net/api
       - FAAS_PRESTAMOS_GRAPHQL_URL=https://fn-prestamos-graphql-biblioteca.azurewebsites.net/api
 

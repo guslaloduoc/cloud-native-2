@@ -223,7 +223,25 @@ public class UsuarioGraphQLFunction {
                     .build();
         }
 
-        JsonObject jsonBody = JsonParser.parseString(body).getAsJsonObject();
+        // Parseo defensivo: rechazamos con 400 los bodies que no son JSON
+        // valido o no contienen el campo 'query'. Sin esto un body como
+        // "{}" o "{\"variables\":{}}" hacia crashear el endpoint con NPE
+        // (criterios 3 y 4 de la pauta: integracion REST+GraphQL robusta).
+        JsonObject jsonBody;
+        try {
+            jsonBody = JsonParser.parseString(body).getAsJsonObject();
+        } catch (Exception e) {
+            return request.createResponseBuilder(HttpStatus.BAD_REQUEST)
+                    .header("Content-Type", "application/json")
+                    .body("{\"error\": \"Body JSON invalido\"}")
+                    .build();
+        }
+        if (!jsonBody.has("query") || jsonBody.get("query").isJsonNull()) {
+            return request.createResponseBuilder(HttpStatus.BAD_REQUEST)
+                    .header("Content-Type", "application/json")
+                    .body("{\"error\": \"El campo 'query' es requerido\"}")
+                    .build();
+        }
         String query = jsonBody.get("query").getAsString();
 
         Map<String, Object> variables = new HashMap<>();

@@ -1,19 +1,42 @@
 package com.biblioteca.fnusuarios;
 
+import com.azure.core.credential.AzureKeyCredential;
+import com.azure.core.models.CloudEvent;
+import com.azure.core.models.CloudEventDataFormat;
+import com.azure.core.util.BinaryData;
+import com.azure.messaging.eventgrid.EventGridPublisherClient;
+import com.azure.messaging.eventgrid.EventGridPublisherClientBuilder;
 import com.biblioteca.fnusuarios.model.Usuario;
 import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
 import com.microsoft.azure.functions.*;
 import com.microsoft.azure.functions.annotation.*;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * Funcion serverless del dominio Usuarios.
+ *
+ * Ademas del CRUD REST, actua como PRODUCTOR de eventos: cuando se
+ * elimina un usuario publica un evento "UsuarioEliminado" al topic
+ * de Azure Event Grid. Otras funciones (subscribers) reaccionan al
+ * evento de forma asincrona; en particular fn-prestamos lo escucha
+ * para eliminar en cascada los prestamos asociados al usuario.
+ *
+ * Mismo patron que fn-prestamos (productor de "PrestamoCreado").
+ */
 public class UsuarioFunction {
 
-    private static final Map<Long, Usuario> usuarios = new HashMap<>();
+    // Almacen en memoria - fuente de verdad de usuarios.
+    // ConcurrentHashMap por la misma razon que en fn-libros y fn-prestamos:
+    // varias invocaciones concurrentes pueden tocar el mismo store.
+    private static final Map<Long, Usuario> usuarios = new ConcurrentHashMap<>();
     private static final AtomicLong idCounter = new AtomicLong(1);
     private static final Gson gson = new Gson();
+
+    // Cliente de Event Grid (lazy: se crea solo cuando se necesita publicar)
+    private static EventGridPublisherClient<CloudEvent> eventGridClient;
 
     // Datos dummy iniciales
     static {
@@ -21,6 +44,60 @@ public class UsuarioFunction {
         Usuario u2 = new Usuario(idCounter.getAndIncrement(), "Maria Lopez", "maria@mail.com", "987654321");
         usuarios.put(u1.getId(), u1);
         usuarios.put(u2.getId(), u2);
+    }
+
+    /**
+     * Construye y cachea el cliente de Azure Event Grid.
+     * Lee endpoint y key desde variables de entorno (Application Settings)
+     * para no exponer credenciales en el codigo.
+     */
+    private static synchronized EventGridPublisherClient<CloudEvent> getEventGridClient() {
+        if (eventGridClient == null) {
+            String endpoint = System.getenv("EVENT_GRID_ENDPOINT");
+            String key = System.getenv("EVENT_GRID_KEY");
+            if (endpoint == null || key == null) {
+                throw new IllegalStateException(
+                        "EVENT_GRID_ENDPOINT y EVENT_GRID_KEY deben estar configurados");
+            }
+            eventGridClient = new EventGridPublisherClientBuilder()
+                    .endpoint(endpoint)
+                    .credential(new AzureKeyCredential(key))
+                    .buildCloudEventPublisherClient();   // formato CloudEvents v1.0
+        }
+        return eventGridClient;
+    }
+
+    /**
+     * PUBLICA EL EVENTO "UsuarioEliminado" al Event Grid Topic.
+     *
+     * Estructura CloudEvent:
+     *   - source:  "biblioteca/fn-usuarios"
+     *   - type:    "UsuarioEliminado"
+     *   - subject: "biblioteca/usuarios/{id}"
+     *   - data:    snapshot del usuario eliminado (id + nombre + email + telefono)
+     *
+     * Esta funcion NO conoce a sus subscribers. fn-prestamos escucha el
+     * evento via subscription "sub-usuarios-eliminados" y elimina en cascada
+     * los prestamos del usuario. Cualquier otro modulo (auditoria, etc.)
+     * podria suscribirse mas adelante sin tocar este codigo.
+     */
+    private static void publishUsuarioEliminado(Usuario usuario, ExecutionContext context) {
+        try {
+            CloudEvent event = new CloudEvent(
+                    "biblioteca/fn-usuarios",                          // source
+                    "UsuarioEliminado",                                // type
+                    BinaryData.fromObject(usuario),                    // data
+                    CloudEventDataFormat.JSON,
+                    "application/json"
+            ).setSubject("biblioteca/usuarios/" + usuario.getId());
+
+            getEventGridClient().sendEvent(event);
+            context.getLogger().info("Evento UsuarioEliminado publicado a Event Grid para usuario id=" + usuario.getId());
+        } catch (Exception e) {
+            // Si falla la publicacion no rompemos el CRUD: el usuario ya fue eliminado.
+            // En produccion aqui iria una estrategia de outbox/retry.
+            context.getLogger().warning("No se pudo publicar evento a Event Grid: " + e.getMessage());
+        }
     }
 
     // GET /api/usuarios - Listar todos
@@ -127,6 +204,10 @@ public class UsuarioFunction {
     }
 
     // DELETE /api/usuarios/{id} - Eliminar usuario
+    // Ademas de borrar el registro local, publica un evento "UsuarioEliminado"
+    // al Event Grid para que fn-prestamos elimine en cascada los prestamos
+    // asociados (requisito del enunciado: "al eliminar un usuario se deben
+    // eliminar tambien sus prestamos").
     @FunctionName("deleteUsuario")
     public HttpResponseMessage delete(
             @HttpTrigger(name = "req",
@@ -146,7 +227,12 @@ public class UsuarioFunction {
                     .build();
         }
 
-        usuarios.remove(userId);
+        // 1) Eliminar localmente y guardar snapshot para el evento
+        Usuario eliminado = usuarios.remove(userId);
+
+        // 2) Publicar evento "UsuarioEliminado" al Event Grid Topic.
+        //    fn-prestamos lo consume y borra en cascada los prestamos del usuario.
+        publishUsuarioEliminado(eliminado, context);
 
         return request.createResponseBuilder(HttpStatus.NO_CONTENT).build();
     }

@@ -8,10 +8,13 @@ import com.azure.messaging.eventgrid.EventGridPublisherClient;
 import com.azure.messaging.eventgrid.EventGridPublisherClientBuilder;
 import com.biblioteca.fnprestamos.model.Prestamo;
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.microsoft.azure.functions.*;
 import com.microsoft.azure.functions.annotation.*;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -24,8 +27,12 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public class PrestamoFunction {
 
-    // Almacen en memoria - este modulo es la "fuente de verdad" de los prestamos
-    private static final Map<Long, Prestamo> prestamos = new HashMap<>();
+    // Almacen en memoria - este modulo es la "fuente de verdad" de los prestamos.
+    // Usamos ConcurrentHashMap porque Azure Functions puede ejecutar
+    // varias invocaciones concurrentes (HTTP + EventGrid trigger) sobre el
+    // mismo proceso; en particular onUsuarioEliminado puede correr en paralelo
+    // a un POST de prestamo. Un HashMap normal expondria ConcurrentModificationException.
+    private static final Map<Long, Prestamo> prestamos = new ConcurrentHashMap<>();
     private static final AtomicLong idCounter = new AtomicLong(1);
     private static final Gson gson = new Gson();
 
@@ -219,5 +226,68 @@ public class PrestamoFunction {
         prestamos.remove(prestamoId);
 
         return request.createResponseBuilder(HttpStatus.NO_CONTENT).build();
+    }
+
+    /**
+     * EVENT GRID TRIGGER - Suscriptor del evento "UsuarioEliminado".
+     *
+     * Esta funcion no se invoca por HTTP. La activa Azure Event Grid cada
+     * vez que fn-usuarios publica un evento "UsuarioEliminado" al topic
+     * biblioteca-eventos. La conexion se configura en Azure mediante el
+     * subscription "sub-usuarios-eliminados" filtrado por type=UsuarioEliminado.
+     *
+     * Implementa el requisito del enunciado: "al eliminar un usuario se
+     * deben eliminar tambien sus prestamos asociados". El borrado en
+     * cascada se hace de forma asincrona y desacoplada: fn-usuarios no
+     * necesita conocer a fn-prestamos.
+     *
+     * Estrategia de match: por usuarioNombre (campo presente en el modelo
+     * Prestamo y en el snapshot del Usuario eliminado dentro del CloudEvent).
+     */
+    @FunctionName("onUsuarioEliminado")
+    public void onUsuarioEliminado(
+            @EventGridTrigger(name = "event") String eventJson,
+            final ExecutionContext context) {
+
+        context.getLogger().info("[fn-prestamos] Evento recibido: " + eventJson);
+
+        try {
+            // 1) Parsear el CloudEvent y extraer el usuario eliminado
+            JsonObject root = JsonParser.parseString(eventJson).getAsJsonObject();
+            String eventType = root.has("type") ? root.get("type").getAsString()
+                    : (root.has("eventType") ? root.get("eventType").getAsString() : "Unknown");
+
+            // Defensa: si por error llega otro tipo de evento al subscription, ignorar
+            if (!"UsuarioEliminado".equals(eventType)) {
+                context.getLogger().info("[fn-prestamos] Evento ignorado (no es UsuarioEliminado): " + eventType);
+                return;
+            }
+
+            JsonObject data = root.has("data") && root.get("data").isJsonObject()
+                    ? root.getAsJsonObject("data")
+                    : new JsonObject();
+
+            String nombreEliminado = data.has("nombre") ? data.get("nombre").getAsString() : null;
+            if (nombreEliminado == null) {
+                context.getLogger().warning("[fn-prestamos] UsuarioEliminado sin campo 'nombre', no se puede aplicar cascada");
+                return;
+            }
+
+            // 2) Eliminar en cascada todos los prestamos del usuario.
+            //    Match case-insensitive + trim por la misma razon que en
+            //    fn-libros: el cliente puede enviar el nombre con variaciones
+            //    de mayusculas. Sin esto, la cascada del enunciado podria no
+            //    ejecutarse (criterio 5 de la pauta).
+            final String nombreBuscado = nombreEliminado.trim();
+            int antes = prestamos.size();
+            prestamos.values().removeIf(p -> p.getUsuarioNombre() != null
+                    && nombreBuscado.equalsIgnoreCase(p.getUsuarioNombre().trim()));
+            int eliminados = antes - prestamos.size();
+
+            context.getLogger().info("[fn-prestamos] Cascada UsuarioEliminado(" + nombreEliminado
+                    + "): " + eliminados + " prestamos eliminados");
+        } catch (Exception e) {
+            context.getLogger().warning("[fn-prestamos] Error procesando UsuarioEliminado: " + e.getMessage());
+        }
     }
 }
